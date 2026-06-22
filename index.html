@@ -201,7 +201,7 @@
 </div>
 
 <script>
-let cac = 300, churn = 3.0, arpu = 50, margin = 75, scenarioOn = false;
+let cac = 300, churn = 3.0, arpu = 50, margin = 75, scenarioOn = false, acq = 100;
 
 const PRESETS = {
   'Early-stage SaaS': { cac: 400, churn: 5.0, arpu: 40, margin: 70 },
@@ -255,6 +255,8 @@ bindPair('cacSlider',    'cacInput',    v => cac    = v, 0);
 bindPair('churnSlider',  'churnInput',  v => churn  = v, 1);
 bindPair('arpuSlider',   'arpuInput',   v => arpu   = v, 0);
 bindPair('marginSlider', 'marginInput', v => margin = v, 0);
+
+bindPair('acqSlider', 'acqInput', v => acq = v, 0);
 
 $('scenarioToggle').addEventListener('change', () => { scenarioOn = $('scenarioToggle').checked; update(); });
 
@@ -346,6 +348,7 @@ const chart = new Chart($('cohortChart'), {
 });
 
 function update() {
+  console.log("acq:", acq);
   const m = computeMetrics(cac, churn, arpu, margin);
 
   $('ltvValue').textContent = '$' + m.ltv.toFixed(0);
