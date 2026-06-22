@@ -267,6 +267,38 @@ function computeMetrics(cacV, churnPct, arpuV, marginPct) {
 }
 
 
+
+function multiCohortSeries(acqV, churnPct, arpuV, marginPct, months) {
+  // For each month t in 0..months-1, a new cohort of acqV customers is acquired.
+  // Each cohort follows the same churn curve. We sum all cohorts' monthly gross
+  // profit contribution into a total monthly revenue series, then cumulate it.
+  const cf = churnPct / 100;
+  const mgp = arpuV * (marginPct / 100); // gross profit per surviving customer per month
+
+  // totalMonthly[t] = total gross profit across all cohorts in month t
+  const totalMonthly = new Array(months).fill(0);
+
+  for (let cohortStart = 0; cohortStart < months; cohortStart++) {
+    let surviving = acqV;
+    for (let t = cohortStart; t < months; t++) {
+      // In month t, this cohort (started at cohortStart) has survived t-cohortStart months
+      // Apply churn: customers surviving = acqV * (1-cf)^(t - cohortStart)
+      surviving = acqV * Math.pow(1 - cf, t - cohortStart);
+      totalMonthly[t] += surviving * mgp;
+    }
+  }
+
+  // Cumulate
+  const cumulative = [];
+  let cum = 0;
+  for (let t = 0; t < months; t++) {
+    cum += totalMonthly[t];
+    cumulative.push(cum);
+  }
+
+  return { totalMonthly, cumulative };
+}
+
 function paybackFromCurve(cacV, churnPct, arpuV, marginPct) {
   const pts = cohortCurve(cacV, churnPct, arpuV, marginPct);
   for (let i = 1; i < pts.length; i++) {
@@ -347,8 +379,56 @@ const chart = new Chart($('cohortChart'), {
   }
 });
 
+// Multi-cohort chart
+const multiChart = new Chart($('multiChart'), {
+  type: 'line',
+  data: {
+    labels: Array.from({ length: 24 }, (_, i) => `M${i}`),
+    datasets: [
+      {
+        label: 'Cumulative gross profit (all cohorts)',
+        data: [],
+        borderColor: '#D9824B',
+        backgroundColor: 'rgba(217,130,75,0.08)',
+        fill: true,
+        borderWidth: 2.5,
+        pointRadius: 0,
+        tension: 0.2,
+      },
+      {
+        label: 'Monthly gross profit run-rate',
+        data: [],
+        borderColor: '#5B7A99',
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        borderDash: [4, 3],
+        pointRadius: 0,
+        tension: 0.2,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'bottom', labels: { color: '#8A93A1', font: { family: 'Inter', size: 11 }, boxWidth: 12, padding: 14 } },
+      tooltip: {
+        backgroundColor: '#161B22', borderColor: '#242C36', borderWidth: 1,
+        titleColor: '#E8E6E1', bodyColor: '#E8E6E1',
+        titleFont: { family: 'JetBrains Mono', size: 11 },
+        bodyFont:  { family: 'JetBrains Mono', size: 11 },
+        callbacks: { label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(0)}` }
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#8A93A1', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 13 }, grid: { color: '#1B212A' } },
+      y: { ticks: { color: '#8A93A1', font: { family: 'JetBrains Mono', size: 10 }, callback: v => '$' + v.toLocaleString() }, grid: { color: '#1B212A' } }
+    }
+  }
+});
+
+
 function update() {
-  console.log("acq:", acq);
   const m = computeMetrics(cac, churn, arpu, margin);
 
   $('ltvValue').textContent = '$' + m.ltv.toFixed(0);
@@ -410,6 +490,28 @@ function update() {
     `;
     tbody.appendChild(tr);
   });
+
+  // Multi-cohort section
+  const { totalMonthly, cumulative } = multiCohortSeries(acq, churn, arpu, margin, 24);
+  multiChart.data.datasets[0].data = cumulative;
+  multiChart.data.datasets[1].data = totalMonthly;
+  multiChart.update();
+
+  // Multi-cohort insight
+  const finalMonthly = totalMonthly[23];
+  const finalCumulative = cumulative[23];
+  const peakMonth = totalMonthly.indexOf(Math.max(...totalMonthly));
+  const steadyState = Math.abs(totalMonthly[23] - totalMonthly[22]) / totalMonthly[23] < 0.01;
+
+  $('multiInsightBox').innerHTML = `
+    Acquiring <b>${acq} customers/month</b> at these assumptions, total monthly gross profit reaches
+    <b>$${finalMonthly.toFixed(0)}</b> by month 23${steadyState ? ', approaching steady state' : ', still growing'}.
+    Cumulative gross profit across all cohorts over 24 months: <b>$${finalCumulative.toLocaleString(undefined, {maximumFractionDigits: 0})}</b>.
+    ${steadyState
+      ? `Monthly run-rate has largely stabilized — churn is roughly absorbing new acquisition at these levels.`
+      : `Monthly run-rate is still climbing at M23 — the business hasn't yet reached a churn-limited ceiling at this acquisition pace.`
+    }
+  `;
 
   $('insightBox').innerHTML = `LTV:CAC is ${ratioNote}. Payback takes <b>${m.payback.toFixed(1)} months</b>; the average customer stays for <b>${m.lifespan.toFixed(1)} months</b> before churning.${scenarioNote}`;
 }
