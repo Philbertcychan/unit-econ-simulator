@@ -121,6 +121,15 @@
           <input type="range" id="marginSlider" min="10" max="95" step="1" value="75">
         </div>
 
+
+        <div class="input-group">
+          <div class="input-label-row">
+            <span class="input-label">Net Dollar Retention (NDR %)</span>
+            <input class="input-value-edit" id="ndrInput" type="text" value="100">
+          </div>
+          <input type="range" id="ndrSlider" min="80" max="130" step="1" value="100">
+        </div>
+
         <div class="toggle-row">
           <div>
             <div class="toggle-label">Show churn-improvement scenario</div>
@@ -196,12 +205,12 @@
 
 
   <footer>
-    Illustrative model. LTV = (ARPU × gross margin %) ÷ monthly churn rate. Payback period = CAC ÷ (ARPU × gross margin %). Assumes constant churn and ARPU — real cohorts typically show churn that decays over time, which understates LTV somewhat.
+    Illustrative model. LTV = (ARPU × gross margin %) ÷ monthly churn rate. Payback period = CAC ÷ (ARPU × gross margin %). Assumes constant churn and ARPU per cohort. NDR compounds monthly on surviving customers only (monthly rate = NDR^(1/12)); at NDR &gt; 100%, expansion revenue partially offsets churn loss. Real cohorts typically show churn that decays over time, which understates LTV somewhat.
   </footer>
 </div>
 
 <script>
-let cac = 300, churn = 3.0, arpu = 50, margin = 75, scenarioOn = false, acq = 100;
+let cac = 300, churn = 3.0, arpu = 50, margin = 75, scenarioOn = false, acq = 100, ndr = 100;
 
 const PRESETS = {
   'Early-stage SaaS': { cac: 400, churn: 5.0, arpu: 40, margin: 70 },
@@ -257,34 +266,43 @@ bindPair('arpuSlider',   'arpuInput',   v => arpu   = v, 0);
 bindPair('marginSlider', 'marginInput', v => margin = v, 0);
 
 bindPair('acqSlider', 'acqInput', v => acq = v, 0);
+bindPair('ndrSlider', 'ndrInput', v => ndr = v, 0);
 
 $('scenarioToggle').addEventListener('change', () => { scenarioOn = $('scenarioToggle').checked; update(); });
 
-function computeMetrics(cacV, churnPct, arpuV, marginPct) {
+function computeMetrics(cacV, churnPct, arpuV, marginPct, ndrPct = 100) {
   const cf = churnPct / 100, mf = marginPct / 100;
   const mgp = arpuV * mf;
-  return { ltv: mgp / cf, ratio: (mgp / cf) / cacV, payback: cacV / mgp, lifespan: 1 / cf, mgp, cf };
+  const er = Math.pow(ndrPct / 100, 1 / 12); // monthly expansion rate
+  const survivalExpansion = er * (1 - cf);
+  // If survivalExpansion >= 1, revenue grows forever — cap LTV at 240 months for display
+  let ltv;
+  if (survivalExpansion >= 1) {
+    // Sum 240 months
+    let s = 0, factor = 1;
+    for (let t = 1; t <= 240; t++) { factor *= survivalExpansion; s += mgp * factor; }
+    ltv = s;
+  } else {
+    ltv = mgp * survivalExpansion / (1 - survivalExpansion);
+  }
+  return { ltv, ratio: ltv / cacV, payback: cacV / mgp, lifespan: 1 / cf, mgp, cf, er };
 }
 
 
 
-function multiCohortSeries(acqV, churnPct, arpuV, marginPct, months) {
-  // For each month t in 0..months-1, a new cohort of acqV customers is acquired.
-  // Each cohort follows the same churn curve. We sum all cohorts' monthly gross
-  // profit contribution into a total monthly revenue series, then cumulate it.
+function multiCohortSeries(acqV, churnPct, arpuV, marginPct, months, ndrPct = 100) {
   const cf = churnPct / 100;
-  const mgp = arpuV * (marginPct / 100); // gross profit per surviving customer per month
+  const mgp = arpuV * (marginPct / 100);
+  const er = Math.pow(ndrPct / 100, 1 / 12); // monthly expansion rate
 
-  // totalMonthly[t] = total gross profit across all cohorts in month t
   const totalMonthly = new Array(months).fill(0);
 
   for (let cohortStart = 0; cohortStart < months; cohortStart++) {
-    let surviving = acqV;
     for (let t = cohortStart; t < months; t++) {
-      // In month t, this cohort (started at cohortStart) has survived t-cohortStart months
-      // Apply churn: customers surviving = acqV * (1-cf)^(t - cohortStart)
-      surviving = acqV * Math.pow(1 - cf, t - cohortStart);
-      totalMonthly[t] += surviving * mgp;
+      const age = t - cohortStart;
+      const surviving = acqV * Math.pow(1 - cf, age);
+      const expansion = Math.pow(er, age);
+      totalMonthly[t] += surviving * mgp * expansion;
     }
   }
 
@@ -299,21 +317,22 @@ function multiCohortSeries(acqV, churnPct, arpuV, marginPct, months) {
   return { totalMonthly, cumulative };
 }
 
-function paybackFromCurve(cacV, churnPct, arpuV, marginPct) {
-  const pts = cohortCurve(cacV, churnPct, arpuV, marginPct);
+function paybackFromCurve(cacV, churnPct, arpuV, marginPct, ndrPct = 100) {
+  const pts = cohortCurve(cacV, churnPct, arpuV, marginPct, ndrPct);
   for (let i = 1; i < pts.length; i++) {
     if (pts[i] >= 0) return i;
   }
   return null; // never pays back within 24 months
 }
 
-function cohortCurve(cacV, churnPct, arpuV, marginPct) {
-  const { mgp, cf } = computeMetrics(cacV, churnPct, arpuV, marginPct);
-  let cum = -cacV, surv = 1.0;
+function cohortCurve(cacV, churnPct, arpuV, marginPct, ndrPct = 100) {
+  const { mgp, cf, er } = computeMetrics(cacV, churnPct, arpuV, marginPct, ndrPct);
+  let cum = -cacV, surv = 1.0, expansionFactor = 1.0;
   const pts = [cum];
   for (let m = 1; m <= 24; m++) {
     surv *= (1 - cf);
-    cum += mgp * surv;
+    expansionFactor *= er;
+    cum += mgp * surv * expansionFactor;
     pts.push(cum);
   }
   return pts;
@@ -429,7 +448,7 @@ const multiChart = new Chart($('multiChart'), {
 
 
 function update() {
-  const m = computeMetrics(cac, churn, arpu, margin);
+  const m = computeMetrics(cac, churn, arpu, margin, ndr);
 
   $('ltvValue').textContent = '$' + m.ltv.toFixed(0);
   $('ratioValue').textContent = m.ratio.toFixed(1) + ':1';
@@ -438,11 +457,11 @@ function update() {
   $('paybackValue').className = 'value ' + (m.payback <= 12 ? 'good' : m.payback > 24 ? 'warn' : '');
   $('lifespanValue').textContent = m.lifespan.toFixed(1) + ' mo';
 
-  chart.data.datasets[0].data = cohortCurve(cac, churn, arpu, margin);
+  chart.data.datasets[0].data = cohortCurve(cac, churn, arpu, margin, ndr);
 
   const ic = Math.max(0.1, churn - 1.0);
   if (scenarioOn) {
-    chart.data.datasets[1].data = cohortCurve(cac, ic, arpu, margin);
+    chart.data.datasets[1].data = cohortCurve(cac, ic, arpu, margin, ndr);
     chart.data.datasets[1].hidden = false;
     $('churnScenarioLabel').textContent = `Comparing current (${churn.toFixed(1)}%) vs improved (${ic.toFixed(1)}%)`;
   } else {
@@ -461,7 +480,7 @@ function update() {
 
   let scenarioNote = '';
   if (scenarioOn) {
-    const im = computeMetrics(cac, ic, arpu, margin);
+    const im = computeMetrics(cac, ic, arpu, margin, ndr);
     const lift = im.ltv - m.ltv;
     const pct = (lift / m.ltv) * 100;
     scenarioNote = ` Cutting monthly churn by 1pt (to ${ic.toFixed(1)}%) lifts LTV by <b class="good">$${lift.toFixed(0)} (+${pct.toFixed(0)}%)</b> — a useful gut check on what a retention investment is worth funding.`;
@@ -474,12 +493,12 @@ function update() {
   tbody.innerHTML = '';
   offsets.forEach(delta => {
     const c = Math.max(0.1, churn + delta);
-    const sm = computeMetrics(cac, c, arpu, margin);
+    const sm = computeMetrics(cac, c, arpu, margin, ndr);
     const isCurrent = delta === 0;
     const tr = document.createElement('tr');
     if (isCurrent) tr.className = 'current-row';
     const ratioClass = sm.ratio >= 3 ? 'good' : sm.ratio < 1 ? 'warn' : '';
-    const pbMonth = paybackFromCurve(cac, c, arpu, margin);
+    const pbMonth = paybackFromCurve(cac, c, arpu, margin, ndr);
     const pbText = pbMonth !== null ? `M${pbMonth}` : '>24 mo';
     const payClass = pbMonth !== null ? (pbMonth <= 12 ? 'good' : pbMonth <= 24 ? '' : 'warn') : 'warn';
     tr.innerHTML = `
@@ -492,7 +511,7 @@ function update() {
   });
 
   // Multi-cohort section
-  const { totalMonthly, cumulative } = multiCohortSeries(acq, churn, arpu, margin, 24);
+  const { totalMonthly, cumulative } = multiCohortSeries(acq, churn, arpu, margin, 24, ndr);
   multiChart.data.datasets[0].data = cumulative;
   multiChart.data.datasets[1].data = totalMonthly;
   multiChart.update();
@@ -513,7 +532,7 @@ function update() {
     }
   `;
 
-  $('insightBox').innerHTML = `LTV:CAC is ${ratioNote}. Payback takes <b>${m.payback.toFixed(1)} months</b>; the average customer stays for <b>${m.lifespan.toFixed(1)} months</b> before churning.${scenarioNote}`;
+  $('insightBox').innerHTML = `LTV:CAC is ${ratioNote}. NDR of ${ndr}%${ndr > 100 ? ' — expanding accounts are boosting LTV above what churn alone would imply' : ndr < 100 ? ' — account contraction is compressing LTV below the pure churn estimate' : ' — no expansion revenue modeled'}. Payback takes <b>${m.payback.toFixed(1)} months</b>; the average customer stays for <b>${m.lifespan.toFixed(1)} months</b> before churning.${scenarioNote}`;
 }
 
 update();
