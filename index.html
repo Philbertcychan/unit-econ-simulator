@@ -66,6 +66,13 @@
   .insight-box b.warn { color: var(--hot); }
   .insight-box b.good { color: var(--cool); }
   footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--panel-border); font-size: 12px; color: var(--text-dim); font-family: var(--mono); line-height: 1.7; }
+  .sens-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-family: var(--mono); font-size: 12px; }
+  .sens-table th { color: var(--text-dim); text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--panel-border); font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10.5px; }
+  .sens-table td { padding: 7px 10px; border-bottom: 1px solid var(--accent-line); color: var(--text); }
+  .sens-table tr.current-row td { background: var(--accent-line); }
+  .sens-table td.good { color: var(--cool); font-weight: 600; }
+  .sens-table td.warn { color: var(--hot); font-weight: 600; }
+  .sens-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--neutral); margin: 22px 0 6px; }
 </style>
 </head>
 <body>
@@ -154,6 +161,11 @@
         <p class="chart-title">Single cohort: cumulative gross profit over 24 months (starts negative by CAC)</p>
         <canvas id="cohortChart" height="110"></canvas>
         <div class="insight-box" id="insightBox"></div>
+        <p class="sens-label">Churn sensitivity — LTV &amp; LTV:CAC</p>
+        <table class="sens-table" id="sensTable">
+          <thead><tr><th>Monthly churn</th><th>LTV</th><th>LTV:CAC</th><th>Payback</th></tr></thead>
+          <tbody id="sensBody"></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -227,6 +239,15 @@ function computeMetrics(cacV, churnPct, arpuV, marginPct) {
   return { ltv: mgp / cf, ratio: (mgp / cf) / cacV, payback: cacV / mgp, lifespan: 1 / cf, mgp, cf };
 }
 
+
+function paybackFromCurve(cacV, churnPct, arpuV, marginPct) {
+  const pts = cohortCurve(cacV, churnPct, arpuV, marginPct);
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i] >= 0) return i;
+  }
+  return null; // never pays back within 24 months
+}
+
 function cohortCurve(cacV, churnPct, arpuV, marginPct) {
   const { mgp, cf } = computeMetrics(cacV, churnPct, arpuV, marginPct);
   let cum = -cacV, surv = 1.0;
@@ -238,6 +259,36 @@ function cohortCurve(cacV, churnPct, arpuV, marginPct) {
   }
   return pts;
 }
+
+
+// Zero-crossing annotation plugin (no external dep)
+const zeroCrossPlugin = {
+  id: 'zeroCross',
+  afterDraw(chart) {
+    const ds = chart.data.datasets[0].data;
+    let crossIdx = -1;
+    for (let i = 1; i < ds.length; i++) {
+      if (ds[i - 1] < 0 && ds[i] >= 0) { crossIdx = i; break; }
+    }
+    if (crossIdx < 0) return;
+    const { ctx, chartArea: { top, bottom }, scales: { x } } = chart;
+    const xPos = x.getPixelForValue(crossIdx);
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#D9824B';
+    ctx.lineWidth = 1.5;
+    ctx.moveTo(xPos, top);
+    ctx.lineTo(xPos, bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#D9824B';
+    ctx.font = "bold 10px 'JetBrains Mono', monospace";
+    ctx.fillText('Payback', xPos + 4, top + 14);
+    ctx.restore();
+  }
+};
+Chart.register(zeroCrossPlugin);
 
 // Chart
 const chart = new Chart($('cohortChart'), {
@@ -307,6 +358,30 @@ function update() {
     const pct = (lift / m.ltv) * 100;
     scenarioNote = ` Cutting monthly churn by 1pt (to ${ic.toFixed(1)}%) lifts LTV by <b class="good">$${lift.toFixed(0)} (+${pct.toFixed(0)}%)</b> — a useful gut check on what a retention investment is worth funding.`;
   }
+
+  
+  // Sensitivity table
+  const offsets = [-2, -1, 0, 1, 2];
+  const tbody = $('sensBody');
+  tbody.innerHTML = '';
+  offsets.forEach(delta => {
+    const c = Math.max(0.1, churn + delta);
+    const sm = computeMetrics(cac, c, arpu, margin);
+    const isCurrent = delta === 0;
+    const tr = document.createElement('tr');
+    if (isCurrent) tr.className = 'current-row';
+    const ratioClass = sm.ratio >= 3 ? 'good' : sm.ratio < 1 ? 'warn' : '';
+    const pbMonth = paybackFromCurve(cac, c, arpu, margin);
+    const pbText = pbMonth !== null ? `M${pbMonth}` : '>24 mo';
+    const payClass = pbMonth !== null ? (pbMonth <= 12 ? 'good' : pbMonth <= 24 ? '' : 'warn') : 'warn';
+    tr.innerHTML = `
+      <td>${c.toFixed(1)}%${isCurrent ? ' <span style="color:var(--neutral);font-size:10px">◀ current</span>' : ''}</td>
+      <td>$${sm.ltv.toFixed(0)}</td>
+      <td class="${ratioClass}">${sm.ratio.toFixed(1)}:1</td>
+      <td class="${payClass}">${pbText}</td>
+    `;
+    tbody.appendChild(tr);
+  });
 
   $('insightBox').innerHTML = `LTV:CAC is ${ratioNote}. Payback takes <b>${m.payback.toFixed(1)} months</b>; the average customer stays for <b>${m.lifespan.toFixed(1)} months</b> before churning.${scenarioNote}`;
 }
