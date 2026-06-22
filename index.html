@@ -170,6 +170,31 @@
     </div>
   </section>
 
+  <section>
+    <p class="section-label">Multi-cohort compounding</p>
+    <div class="panel">
+      <p class="chart-title" style="margin-bottom:0">
+        How total revenue builds as new customer cohorts layer on top of older ones — using the same assumptions above.
+      </p>
+      <p style="font-size:12px; color:var(--text-dim); margin:6px 0 20px; font-family:var(--mono);">
+        Each month, a fixed number of new customers are acquired. Every cohort follows the same churn/ARPU/margin assumptions set above.
+      </p>
+
+      <div class="input-group" style="max-width:400px">
+        <div class="input-label-row">
+          <span class="input-label">New customers acquired per month</span>
+          <input class="input-value-edit" id="acqInput" type="text" value="100">
+        </div>
+        <input type="range" id="acqSlider" min="10" max="1000" step="10" value="100">
+      </div>
+
+      <p class="chart-title" id="multiChartTitle">Total cumulative gross profit across all active cohorts, months 0–23</p>
+      <canvas id="multiChart" height="100"></canvas>
+      <div class="insight-box" id="multiInsightBox" style="margin-top:18px"></div>
+    </div>
+  </section>
+
+
   <footer>
     Illustrative model. LTV = (ARPU × gross margin %) ÷ monthly churn rate. Payback period = CAC ÷ (ARPU × gross margin %). Assumes constant churn and ARPU — real cohorts typically show churn that decays over time, which understates LTV somewhat.
   </footer>
