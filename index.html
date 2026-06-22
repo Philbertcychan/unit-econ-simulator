@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unit Economics Simulator — SaaS LTV / CAC / Payback</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0E1116;
+    --panel: #161B22;
+    --panel-border: #242C36;
+    --text: #E8E6E1;
+    --text-dim: #8A93A1;
+    --hot: #D9824B;
+    --cool: #7FA889;
+    --neutral: #5B7A99;
+    --accent-line: #2A3441;
+    --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --sans: 'Inter', -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 48px 24px 80px; }
+  header { border-bottom: 1px solid var(--panel-border); padding-bottom: 28px; margin-bottom: 36px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--neutral); margin: 0 0 10px; }
+  h1 { font-size: 30px; font-weight: 650; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .subhead { color: var(--text-dim); font-size: 15px; max-width: 680px; line-height: 1.55; margin: 0; }
+  section { margin-bottom: 40px; }
+  .section-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--neutral); margin: 0 0 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 24px; }
+  .grid-layout { display: grid; grid-template-columns: 360px 1fr; gap: 20px; }
+  @media (max-width: 860px) { .grid-layout { grid-template-columns: 1fr; } }
+  .preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+  .preset-btn { background: var(--bg); border: 1px solid var(--panel-border); color: var(--text-dim); font-family: var(--sans); font-size: 12.5px; padding: 7px 13px; border-radius: 5px; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+  .preset-btn:hover { border-color: var(--neutral); color: var(--text); }
+  .preset-btn.active { background: var(--neutral); border-color: var(--neutral); color: #0E1116; font-weight: 600; }
+  .input-group { margin-bottom: 22px; }
+  .input-label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .input-label { font-size: 13px; color: var(--text); font-weight: 500; }
+  .input-value-edit { font-family: var(--mono); font-size: 13px; color: var(--neutral); font-weight: 600; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px; padding: 2px 6px; width: 64px; text-align: right; }
+  .input-value-edit:focus { outline: none; border-color: var(--neutral); }
+  input[type="range"] { width: 100%; height: 4px; border-radius: 2px; background: var(--accent-line); outline: none; -webkit-appearance: none; cursor: pointer; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--neutral); cursor: pointer; border: 2px solid var(--bg); }
+  input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--neutral); cursor: pointer; border: 2px solid var(--bg); }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding-top: 16px; border-top: 1px solid var(--panel-border); margin-top: 6px; gap: 16px; }
+  .toggle-label { font-size: 13px; color: var(--text); }
+  .toggle-sublabel { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+  .switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider-toggle { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--accent-line); border-radius: 24px; transition: 0.2s; }
+  .slider-toggle:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: var(--text-dim); border-radius: 50%; transition: 0.2s; }
+  input:checked + .slider-toggle { background: var(--hot); }
+  input:checked + .slider-toggle:before { transform: translateX(18px); background: var(--bg); }
+  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+  @media (max-width: 700px) { .metric-grid { grid-template-columns: repeat(2, 1fr); } }
+  .metric-card { background: var(--bg); border: 1px solid var(--panel-border); border-radius: 6px; padding: 16px 18px; }
+  .metric-card .label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 8px; }
+  .metric-card .value { font-family: var(--mono); font-size: 24px; font-weight: 700; line-height: 1; color: var(--text); }
+  .metric-card .value.good { color: var(--cool); }
+  .metric-card .value.warn { color: var(--hot); }
+  .metric-card .sublabel { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+  .chart-title { font-size: 13px; color: var(--text-dim); margin: 0 0 16px; font-family: var(--mono); }
+  .insight-box { margin-top: 18px; padding: 16px 18px; background: var(--bg); border-left: 3px solid var(--neutral); border-radius: 4px; font-size: 13.5px; line-height: 1.6; color: var(--text); }
+  .insight-box b { color: var(--neutral); }
+  .insight-box b.warn { color: var(--hot); }
+  .insight-box b.good { color: var(--cool); }
+  footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--panel-border); font-size: 12px; color: var(--text-dim); font-family: var(--mono); line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Unit economics simulator</p>
+    <h1>How CAC, churn, and ARPU shape payback</h1>
+    <p class="subhead">Adjust the assumptions below to see how customer lifetime value, the LTV:CAC ratio, and payback period respond — and how a single cohort's revenue plays out over its first two years. Toggle the churn-improvement scenario to see how much a retention fix is actually worth.</p>
+  </header>
+
+  <section>
+    <div class="grid-layout">
+      <div class="panel">
+        <p class="section-label">Assumptions</p>
+        <div class="preset-row" id="presetRow"></div>
+
+        <div class="input-group">
+          <div class="input-label-row">
+            <span class="input-label">Customer acquisition cost (CAC)</span>
+            <input class="input-value-edit" id="cacInput" type="text" value="300">
+          </div>
+          <input type="range" id="cacSlider" min="10" max="2000" step="10" value="300">
+        </div>
+
+        <div class="input-group">
+          <div class="input-label-row">
+            <span class="input-label">Monthly churn rate (%)</span>
+            <input class="input-value-edit" id="churnInput" type="text" value="3.0">
+          </div>
+          <input type="range" id="churnSlider" min="0.5" max="15" step="0.1" value="3.0">
+        </div>
+
+        <div class="input-group">
+          <div class="input-label-row">
+            <span class="input-label">Monthly ARPU ($)</span>
+            <input class="input-value-edit" id="arpuInput" type="text" value="50">
+          </div>
+          <input type="range" id="arpuSlider" min="5" max="500" step="5" value="50">
+        </div>
+
+        <div class="input-group">
+          <div class="input-label-row">
+            <span class="input-label">Gross margin (%)</span>
+            <input class="input-value-edit" id="marginInput" type="text" value="75">
+          </div>
+          <input type="range" id="marginSlider" min="10" max="95" step="1" value="75">
+        </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Show churn-improvement scenario</div>
+            <div class="toggle-sublabel" id="churnScenarioLabel">Compare against 1pt lower monthly churn</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="scenarioToggle">
+            <span class="slider-toggle"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <p class="section-label">Results</p>
+        <div class="metric-grid">
+          <div class="metric-card">
+            <div class="label">LTV</div>
+            <div class="value" id="ltvValue">—</div>
+            <div class="sublabel">lifetime gross profit per customer</div>
+          </div>
+          <div class="metric-card">
+            <div class="label">LTV : CAC</div>
+            <div class="value" id="ratioValue">—</div>
+            <div class="sublabel">target is usually 3:1+</div>
+          </div>
+          <div class="metric-card">
+            <div class="label">Payback period</div>
+            <div class="value" id="paybackValue">—</div>
+            <div class="sublabel">months to recover CAC</div>
+          </div>
+          <div class="metric-card">
+            <div class="label">Avg. lifespan</div>
+            <div class="value" id="lifespanValue">—</div>
+            <div class="sublabel">1 / monthly churn</div>
+          </div>
+        </div>
+
+        <p class="chart-title">Single cohort: cumulative gross profit over 24 months (starts negative by CAC)</p>
+        <canvas id="cohortChart" height="110"></canvas>
+        <div class="insight-box" id="insightBox"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Illustrative model. LTV = (ARPU × gross margin %) ÷ monthly churn rate. Payback period = CAC ÷ (ARPU × gross margin %). Assumes constant churn and ARPU — real cohorts typically show churn that decays over time, which understates LTV somewhat.
+  </footer>
+</div>
+
+<script>
+let cac = 300, churn = 3.0, arpu = 50, margin = 75, scenarioOn = false;
+
+const PRESETS = {
+  'Early-stage SaaS': { cac: 400, churn: 5.0, arpu: 40, margin: 70 },
+  'Mature SaaS':      { cac: 800, churn: 1.5, arpu: 120, margin: 80 },
+  'Marketplace':      { cac: 150, churn: 8.0, arpu: 25,  margin: 60 },
+};
+
+const $ = id => document.getElementById(id);
+
+// Presets
+Object.keys(PRESETS).forEach(name => {
+  const btn = document.createElement('button');
+  btn.className = 'preset-btn';
+  btn.textContent = name;
+  btn.addEventListener('click', () => {
+    const p = PRESETS[name];
+    cac = p.cac; churn = p.churn; arpu = p.arpu; margin = p.margin;
+    sync();
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    update();
+  });
+  $('presetRow').appendChild(btn);
+});
+
+function sync() {
+  $('cacSlider').value = cac;   $('cacInput').value = cac;
+  $('churnSlider').value = churn; $('churnInput').value = churn.toFixed(1);
+  $('arpuSlider').value = arpu;  $('arpuInput').value = arpu;
+  $('marginSlider').value = margin; $('marginInput').value = margin;
+}
+
+function bindPair(sliderId, inputId, setter, dec) {
+  const slider = $(sliderId), input = $(inputId);
+  slider.addEventListener('input', () => {
+    const v = parseFloat(slider.value); setter(v);
+    input.value = dec ? v.toFixed(dec) : v;
+    update();
+  });
+  input.addEventListener('change', () => {
+    let v = parseFloat(input.value);
+    if (isNaN(v)) v = parseFloat(slider.value);
+    v = Math.max(parseFloat(slider.min), Math.min(parseFloat(slider.max), v));
+    setter(v); slider.value = v;
+    input.value = dec ? v.toFixed(dec) : v;
+    update();
+  });
+}
+
+bindPair('cacSlider',    'cacInput',    v => cac    = v, 0);
+bindPair('churnSlider',  'churnInput',  v => churn  = v, 1);
+bindPair('arpuSlider',   'arpuInput',   v => arpu   = v, 0);
+bindPair('marginSlider', 'marginInput', v => margin = v, 0);
+
+$('scenarioToggle').addEventListener('change', () => { scenarioOn = $('scenarioToggle').checked; update(); });
+
+function computeMetrics(cacV, churnPct, arpuV, marginPct) {
+  const cf = churnPct / 100, mf = marginPct / 100;
+  const mgp = arpuV * mf;
+  return { ltv: mgp / cf, ratio: (mgp / cf) / cacV, payback: cacV / mgp, lifespan: 1 / cf, mgp, cf };
+}
+
+function cohortCurve(cacV, churnPct, arpuV, marginPct) {
+  const { mgp, cf } = computeMetrics(cacV, churnPct, arpuV, marginPct);
+  let cum = -cacV, surv = 1.0;
+  const pts = [cum];
+  for (let m = 1; m <= 24; m++) {
+    surv *= (1 - cf);
+    cum += mgp * surv;
+    pts.push(cum);
+  }
+  return pts;
+}
+
+// Chart
+const chart = new Chart($('cohortChart'), {
+  type: 'line',
+  data: {
+    labels: Array.from({ length: 25 }, (_, i) => `M${i}`),
+    datasets: [
+      { label: 'Current assumptions', data: [], borderColor: '#5B7A99', backgroundColor: 'transparent', borderWidth: 2.5, pointRadius: 0, tension: 0.1 },
+      { label: 'Improved churn (−1pt)', data: [], borderColor: '#7FA889', backgroundColor: 'transparent', borderWidth: 2, borderDash: [5, 4], pointRadius: 0, tension: 0.1, hidden: true }
+    ]
+  },
+  options: {
+    responsive: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'bottom', labels: { color: '#8A93A1', font: { family: 'Inter', size: 11 }, boxWidth: 12, padding: 14 } },
+      tooltip: {
+        backgroundColor: '#161B22', borderColor: '#242C36', borderWidth: 1,
+        titleColor: '#E8E6E1', bodyColor: '#E8E6E1',
+        titleFont: { family: 'JetBrains Mono', size: 11 },
+        bodyFont:  { family: 'JetBrains Mono', size: 11 },
+        callbacks: { label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}` }
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#8A93A1', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 13 }, grid: { color: '#1B212A' } },
+      y: { ticks: { color: '#8A93A1', font: { family: 'JetBrains Mono', size: 10 }, callback: v => '$' + v }, grid: { color: '#1B212A' } }
+    }
+  }
+});
+
+function update() {
+  const m = computeMetrics(cac, churn, arpu, margin);
+
+  $('ltvValue').textContent = '$' + m.ltv.toFixed(0);
+  $('ratioValue').textContent = m.ratio.toFixed(1) + ':1';
+  $('ratioValue').className = 'value ' + (m.ratio >= 3 ? 'good' : m.ratio < 1 ? 'warn' : '');
+  $('paybackValue').textContent = m.payback.toFixed(1) + ' mo';
+  $('paybackValue').className = 'value ' + (m.payback <= 12 ? 'good' : m.payback > 24 ? 'warn' : '');
+  $('lifespanValue').textContent = m.lifespan.toFixed(1) + ' mo';
+
+  chart.data.datasets[0].data = cohortCurve(cac, churn, arpu, margin);
+
+  const ic = Math.max(0.1, churn - 1.0);
+  if (scenarioOn) {
+    chart.data.datasets[1].data = cohortCurve(cac, ic, arpu, margin);
+    chart.data.datasets[1].hidden = false;
+    $('churnScenarioLabel').textContent = `Comparing current (${churn.toFixed(1)}%) vs improved (${ic.toFixed(1)}%)`;
+  } else {
+    chart.data.datasets[1].hidden = true;
+    $('churnScenarioLabel').textContent = `Compare against 1pt lower monthly churn`;
+  }
+
+  chart.update();
+
+  // Insight
+  const ratioNote = m.ratio >= 3
+    ? `<b class="good">healthy</b> — above the 3:1 rule of thumb`
+    : m.ratio >= 1
+      ? `<b class="warn">thin</b> — below the typical 3:1 target, though still lifetime-profitable`
+      : `<b class="warn">underwater</b> — CAC exceeds LTV at these assumptions`;
+
+  let scenarioNote = '';
+  if (scenarioOn) {
+    const im = computeMetrics(cac, ic, arpu, margin);
+    const lift = im.ltv - m.ltv;
+    const pct = (lift / m.ltv) * 100;
+    scenarioNote = ` Cutting monthly churn by 1pt (to ${ic.toFixed(1)}%) lifts LTV by <b class="good">$${lift.toFixed(0)} (+${pct.toFixed(0)}%)</b> — a useful gut check on what a retention investment is worth funding.`;
+  }
+
+  $('insightBox').innerHTML = `LTV:CAC is ${ratioNote}. Payback takes <b>${m.payback.toFixed(1)} months</b>; the average customer stays for <b>${m.lifespan.toFixed(1)} months</b> before churning.${scenarioNote}`;
+}
+
+update();
+</script>
+</body>
+</html>
